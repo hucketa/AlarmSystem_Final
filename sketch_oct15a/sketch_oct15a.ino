@@ -8,17 +8,15 @@ namespace Config {
     constexpr uint8_t SCL_PIN = 9;
     constexpr uint8_t MAX_LCD_COLS = 20;
     constexpr uint8_t MAX_LCD_ROWS = 4;
+    constexpr uint8_t MAX_DISPLAYS = 4;
     constexpr unsigned long LCD_CHECK_INTERVAL = 1000;
 }
 
 class LcdDisplay {
 public:
     LcdDisplay(uint8_t address, uint8_t columns, uint8_t rows)
-        : address(address),
-          cols(limitCols(columns)),
-          rows(limitRows(rows)),
-          lcd(address, cols, rows),
-          online(false), checked(false), lastCheck(0), cache{} {}
+        : address(address), cols(limitCols(columns)), rows(limitRows(rows)),
+          lcd(address, cols, rows), online(false), checked(false), lastCheck(0), cache{} {}
 
     void service() {
         unsigned long now = millis();
@@ -84,15 +82,89 @@ private:
     }
 };
 
+struct ScreenPage {
+    char lines[Config::MAX_LCD_ROWS][Config::MAX_LCD_COLS + 1] = {};
+    uint8_t lineCount = 0;
+
+    void setLine(uint8_t row, const char* text) {
+        if (row >= Config::MAX_LCD_ROWS) return;
+        size_t length = text ? strlen(text) : 0;
+        if (length > Config::MAX_LCD_COLS) length = Config::MAX_LCD_COLS;
+        if (length > 0) memcpy(lines[row], text, length);
+        lines[row][length] = '\0';
+        if (lineCount <= row) lineCount = row + 1;
+    }
+
+    void clear() {
+        for (uint8_t row = 0; row < Config::MAX_LCD_ROWS; row++)
+            lines[row][0] = '\0';
+        lineCount = 0;
+    }
+};
+
+class DisplayManager {
+public:
+    DisplayManager() : count(0), displays{} {}
+
+    bool addDisplay(LcdDisplay& display) {
+        if (findDisplay(display) >= 0) return false;
+        if (count >= Config::MAX_DISPLAYS) return false;
+        displays[count].display = &display;
+        displays[count].page.clear();
+        count++;
+        return true;
+    }
+
+    bool setPage(LcdDisplay& display, const ScreenPage& page) {
+        int8_t index = findDisplay(display);
+        if (index < 0) return false;
+        displays[index].page = page;
+        return true;
+    }
+
+    void service() {
+        for (uint8_t i = 0; i < count; i++) {
+            displays[i].display->service();
+            renderPage(displays[i].display, displays[i].page);
+        }
+    }
+
+    uint8_t displayCount() const { return count; }
+
+private:
+    struct DisplaySlot {
+        LcdDisplay* display = nullptr;
+        ScreenPage page;
+    };
+
+    DisplaySlot displays[Config::MAX_DISPLAYS];
+    uint8_t count;
+
+    int8_t findDisplay(const LcdDisplay& display) const {
+        for (uint8_t i = 0; i < count; i++)
+            if (displays[i].display == &display) return i;
+        return -1;
+    }
+
+    static void renderPage(LcdDisplay* display, const ScreenPage& page) {
+        for (uint8_t row = 0; row < display->rowCount(); row++) {
+            if (row < page.lineCount) display->printLine(row, page.lines[row]);
+            else display->printLine(row, "");
+        }
+    }
+};
+
 LcdDisplay temperatureDisplay(0x25, 16, 2);
 LcdDisplay pressureDisplay(0x27, 16, 2);
+DisplayManager displayManager;
 
 void setup() {
     Serial.begin(115200);
     Wire.begin(Config::SDA_PIN, Config::SCL_PIN);
+    displayManager.addDisplay(temperatureDisplay);
+    displayManager.addDisplay(pressureDisplay);
 }
 
 void loop() {
-    temperatureDisplay.service();
-    pressureDisplay.service();
+    displayManager.service();
 }
