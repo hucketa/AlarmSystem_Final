@@ -9,7 +9,9 @@ namespace Config {
     constexpr uint8_t MAX_LCD_COLS = 20;
     constexpr uint8_t MAX_LCD_ROWS = 4;
     constexpr uint8_t MAX_DISPLAYS = 4;
+    constexpr uint8_t MAX_PAGES_PER_DISPLAY = 8;
     constexpr unsigned long LCD_CHECK_INTERVAL = 1000;
+    constexpr unsigned long DEFAULT_PAGE_INTERVAL = 3000;
 }
 
 class LcdDisplay {
@@ -86,13 +88,14 @@ struct ScreenPage {
     char lines[Config::MAX_LCD_ROWS][Config::MAX_LCD_COLS + 1] = {};
     uint8_t lineCount = 0;
 
-    void setLine(uint8_t row, const char* text) {
-        if (row >= Config::MAX_LCD_ROWS) return;
+    bool setLine(uint8_t row, const char* text) {
+        if (row >= Config::MAX_LCD_ROWS) return false;
         size_t length = text ? strlen(text) : 0;
         if (length > Config::MAX_LCD_COLS) length = Config::MAX_LCD_COLS;
         if (length > 0) memcpy(lines[row], text, length);
         lines[row][length] = '\0';
         if (lineCount <= row) lineCount = row + 1;
+        return true;
     }
 
     void clear() {
@@ -109,23 +112,64 @@ public:
     bool addDisplay(LcdDisplay& display) {
         if (findDisplay(display) >= 0) return false;
         if (count >= Config::MAX_DISPLAYS) return false;
-        displays[count].display = &display;
-        displays[count].page.clear();
-        count++;
+        DisplaySlot& slot = displays[count++];
+        slot.display = &display;
+        slot.pageCount = 0;
+        slot.currentPage = 0;
+        slot.pageInterval = Config::DEFAULT_PAGE_INTERVAL;
+        slot.lastPageSwitch = millis();
+        slot.blanked = false;
         return true;
     }
 
-    bool setPage(LcdDisplay& display, const ScreenPage& page) {
+    bool addPage(LcdDisplay& display, const ScreenPage& page) {
         int8_t index = findDisplay(display);
         if (index < 0) return false;
-        displays[index].page = page;
+        DisplaySlot& slot = displays[index];
+        if (slot.pageCount >= Config::MAX_PAGES_PER_DISPLAY) return false;
+        slot.pages[slot.pageCount++] = page;
+        slot.currentPage = 0;
+        slot.lastPageSwitch = millis();
+        slot.blanked = false;
+        return true;
+    }
+
+    bool clearPages(LcdDisplay& display) {
+        int8_t index = findDisplay(display);
+        if (index < 0) return false;
+        DisplaySlot& slot = displays[index];
+        slot.pageCount = 0;
+        slot.currentPage = 0;
+        slot.blanked = false;
+        return true;
+    }
+
+    bool setPageInterval(LcdDisplay& display, unsigned long interval) {
+        int8_t index = findDisplay(display);
+        if (index < 0 || interval == 0) return false;
+        DisplaySlot& slot = displays[index];
+        slot.pageInterval = interval;
+        slot.lastPageSwitch = millis();
         return true;
     }
 
     void service() {
         for (uint8_t i = 0; i < count; i++) {
-            displays[i].display->service();
-            renderPage(displays[i].display, displays[i].page);
+            DisplaySlot& slot = displays[i];
+            slot.display->service();
+            if (slot.pageCount == 0) {
+                if (!slot.blanked) slot.display->clear();
+                slot.blanked = true;
+                continue;
+            }
+            slot.blanked = false;
+            unsigned long now = millis();
+            if (slot.pageCount > 1 && now - slot.lastPageSwitch >= slot.pageInterval) {
+                slot.currentPage++;
+                if (slot.currentPage >= slot.pageCount) slot.currentPage = 0;
+                slot.lastPageSwitch = now;
+            }
+            renderPage(*slot.display, slot.pages[slot.currentPage]);
         }
     }
 
@@ -134,7 +178,12 @@ public:
 private:
     struct DisplaySlot {
         LcdDisplay* display = nullptr;
-        ScreenPage page;
+        ScreenPage pages[Config::MAX_PAGES_PER_DISPLAY];
+        uint8_t pageCount = 0;
+        uint8_t currentPage = 0;
+        unsigned long pageInterval = Config::DEFAULT_PAGE_INTERVAL;
+        unsigned long lastPageSwitch = 0;
+        bool blanked = false;
     };
 
     DisplaySlot displays[Config::MAX_DISPLAYS];
@@ -146,10 +195,10 @@ private:
         return -1;
     }
 
-    static void renderPage(LcdDisplay* display, const ScreenPage& page) {
-        for (uint8_t row = 0; row < display->rowCount(); row++) {
-            if (row < page.lineCount) display->printLine(row, page.lines[row]);
-            else display->printLine(row, "");
+    static void renderPage(LcdDisplay& display, const ScreenPage& page) {
+        for (uint8_t row = 0; row < display.rowCount(); row++) {
+            if (row < page.lineCount) display.printLine(row, page.lines[row]);
+            else display.printLine(row, "");
         }
     }
 };
@@ -159,10 +208,20 @@ LcdDisplay pressureDisplay(0x27, 16, 2);
 DisplayManager displayManager;
 
 void setup() {
-    Serial.begin(115200);
     Wire.begin(Config::SDA_PIN, Config::SCL_PIN);
+
     displayManager.addDisplay(temperatureDisplay);
     displayManager.addDisplay(pressureDisplay);
+
+    ScreenPage temperaturePage;
+    temperaturePage.setLine(0, "TEMPERATURE");
+    temperaturePage.setLine(1, "System ready");
+    displayManager.addPage(temperatureDisplay, temperaturePage);
+
+    ScreenPage pressurePage;
+    pressurePage.setLine(0, "PRESSURE");
+    pressurePage.setLine(1, "System ready");
+    displayManager.addPage(pressureDisplay, pressurePage);
 }
 
 void loop() {
