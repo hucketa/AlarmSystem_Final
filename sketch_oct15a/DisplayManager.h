@@ -1,9 +1,11 @@
-
 #pragma once
 #include <Arduino.h>
 #include <LiquidCrystal_I2C.h>
 #include "Config.h"
 
+// =====================================================
+// LCD DISPLAY
+// =====================================================
 class LcdDisplay {
 public:
     LcdDisplay(uint8_t address, uint8_t columns, uint8_t rows);
@@ -27,6 +29,9 @@ private:
     void resetCache();
 };
 
+// =====================================================
+// SCREEN PAGE
+// =====================================================
 struct ScreenPage {
     char lines[Config::MAX_LCD_ROWS][Config::MAX_LCD_COLS + 1] = {};
     uint8_t lineCount = 0;
@@ -34,6 +39,9 @@ struct ScreenPage {
     void clear();
 };
 
+// =====================================================
+// DISPLAY MANAGER
+// =====================================================
 class DisplayManager {
 public:
     DisplayManager();
@@ -53,6 +61,7 @@ private:
         uint8_t pageCount = 0;
         uint8_t currentPage = 0;
         bool blanked = false;
+        bool dirty = true;
     };
     DisplaySlot displays[Config::MAX_DISPLAYS];
     uint8_t count;

@@ -168,17 +168,14 @@ DisplayManager::DisplayManager() : displays{}, count(0) {
 // REGISTER DISPLAY
 // =====================================================
 bool DisplayManager::addDisplay(LcdDisplay& display) {
-    if (findDisplay(display) >= 0) {
-        return false;
-    }
-    if (count >= Config::MAX_DISPLAYS) {
-        return false;
-    }
+    if (findDisplay(display) >= 0) return false;
+    if (count >= Config::MAX_DISPLAYS) return false;
     DisplaySlot& slot = displays[count++];
     slot.display = &display;
     slot.pageCount = 0;
     slot.currentPage = 0;
     slot.blanked = false;
+    slot.dirty = true;
     return true;
 }
 
@@ -187,18 +184,13 @@ bool DisplayManager::addDisplay(LcdDisplay& display) {
 // =====================================================
 bool DisplayManager::addPage(LcdDisplay& display, const ScreenPage& page) {
     int8_t index = findDisplay(display);
-    if (index < 0) {
-        return false;
-    }
+    if (index < 0) return false;
     DisplaySlot& slot = displays[index];
-    if (slot.pageCount >= Config::MAX_PAGES_PER_DISPLAY) {
-        return false;
-    }
-    if (slot.pageCount == 0) {
-        slot.currentPage = 0;
-    }
+    if (slot.pageCount >= Config::MAX_PAGES_PER_DISPLAY) return false;
+    if (slot.pageCount == 0) slot.currentPage = 0;
     slot.pages[slot.pageCount++] = page;
     slot.blanked = false;
+    slot.dirty = true;
     return true;
 }
 
@@ -207,29 +199,31 @@ bool DisplayManager::addPage(LcdDisplay& display, const ScreenPage& page) {
 // =====================================================
 bool DisplayManager::replacePage(LcdDisplay& display, uint8_t pageIndex, const ScreenPage& page) {
     int8_t index = findDisplay(display);
-    if (index < 0) {
-        return false;
-    }
+    if (index < 0) return false;
     DisplaySlot& slot = displays[index];
-    if (pageIndex >= slot.pageCount) {
-        return false;
+    if (pageIndex >= slot.pageCount) return false;
+    ScreenPage& current = slot.pages[pageIndex];
+    bool changed = current.lineCount != page.lineCount;
+    for (uint8_t row = 0; !changed && row < Config::MAX_LCD_ROWS; row++) {
+        if (strcmp(current.lines[row], page.lines[row]) != 0) changed = true;
     }
-    slot.pages[pageIndex] = page;
+    if (!changed) return true;
+    current = page;
+    if (slot.currentPage == pageIndex) slot.dirty = true;
     return true;
 }
 
 // =====================================================
 // REMOVE PAGE
 // =====================================================
+// =====================================================
+// REMOVE PAGE
+// =====================================================
 bool DisplayManager::removePage(LcdDisplay& display, uint8_t pageIndex) {
     int8_t index = findDisplay(display);
-    if (index < 0) {
-        return false;
-    }
+    if (index < 0) return false;
     DisplaySlot& slot = displays[index];
-    if (pageIndex >= slot.pageCount) {
-        return false;
-    }
+    if (pageIndex >= slot.pageCount) return false;
     uint8_t oldCurrent = slot.currentPage;
     for (uint8_t i = pageIndex; i + 1 < slot.pageCount; i++) {
         slot.pages[i] = slot.pages[i + 1];
@@ -245,6 +239,7 @@ bool DisplayManager::removePage(LcdDisplay& display, uint8_t pageIndex) {
         slot.currentPage = oldCurrent;
     }
     slot.blanked = false;
+    slot.dirty = true;
     return true;
 }
 
@@ -253,13 +248,12 @@ bool DisplayManager::removePage(LcdDisplay& display, uint8_t pageIndex) {
 // =====================================================
 bool DisplayManager::clearPages(LcdDisplay& display) {
     int8_t index = findDisplay(display);
-    if (index < 0) {
-        return false;
-    }
+    if (index < 0) return false;
     DisplaySlot& slot = displays[index];
     slot.pageCount = 0;
     slot.currentPage = 0;
     slot.blanked = false;
+    slot.dirty = true;
     return true;
 }
 
@@ -268,14 +262,13 @@ bool DisplayManager::clearPages(LcdDisplay& display) {
 // =====================================================
 bool DisplayManager::showPage(LcdDisplay& display, uint8_t pageIndex) {
     int8_t index = findDisplay(display);
-    if (index < 0) {
-        return false;
-    }
+    if (index < 0) return false;
     DisplaySlot& slot = displays[index];
-    if (pageIndex >= slot.pageCount) {
-        return false;
+    if (pageIndex >= slot.pageCount) return false;
+    if (slot.currentPage != pageIndex) {
+        slot.currentPage = pageIndex;
+        slot.dirty = true;
     }
-    slot.currentPage = pageIndex;
     slot.blanked = false;
     return true;
 }
@@ -294,19 +287,27 @@ int8_t DisplayManager::getPageCount(const LcdDisplay& display) const {
 // =====================================================
 // UPDATE DISPLAYS
 // =====================================================
+// =====================================================
+// UPDATE DISPLAYS
+// =====================================================
 void DisplayManager::service() {
     for (uint8_t i = 0; i < count; i++) {
         DisplaySlot& slot = displays[i];
+        bool wasOnline = slot.display->isOnline();
         slot.display->service();
+        bool isOnline = slot.display->isOnline();
+        if (isOnline && !wasOnline) slot.dirty = true;
+        if (!isOnline) continue;
         if (slot.pageCount == 0) {
-            if (!slot.blanked) {
-                slot.display->clear();
-            }
+            if (!slot.blanked) slot.display->clear();
             slot.blanked = true;
+            slot.dirty = false;
             continue;
         }
         slot.blanked = false;
+        if (!slot.dirty) continue;
         renderPage(*slot.display, slot.pages[slot.currentPage]);
+        slot.dirty = false;
     }
 }
 
