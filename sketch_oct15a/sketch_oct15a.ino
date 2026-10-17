@@ -4,6 +4,10 @@
 
 #include "Config.h"
 #include "DisplayManager.h"
+#include "SensorTypes.h"
+#include "MeasurementRegistry.h"
+
+
 
 // =====================================================
 // LCD
@@ -13,6 +17,7 @@ LcdDisplay temperatureDisplay(0x25, 16, 2);
 LcdDisplay pressureDisplay(0x27, 16, 2);
 
 DisplayManager displayManager;
+MeasurementRegistry measurementRegistry;
 
 // =====================================================
 // SETUP
