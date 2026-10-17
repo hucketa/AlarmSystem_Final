@@ -1,4 +1,3 @@
-
 #include "TemperatureSensor.h"
 #include <math.h>
 
@@ -17,14 +16,14 @@ void TemperatureSensor::begin() {
     bool supplyFound = sensors.isConnected(Config::TEMP_SUPPLY_ROM);
     bool returnFound = sensors.isConnected(Config::TEMP_RETURN_ROM);
     if (supplyFound) {
-        sensors.setResolution(Config::TEMP_SUPPLY_ROM, 12);
+        sensors.setResolution(Config::TEMP_SUPPLY_ROM, Config::TEMP_RESOLUTION_BITS);
         Serial.println("DS18B20 supply: found");
     } else {
         registry.setError(ChannelId::TEMP_SUPPLY);
         Serial.println("DS18B20 supply: NOT FOUND");
     }
     if (returnFound) {
-        sensors.setResolution(Config::TEMP_RETURN_ROM, 12);
+        sensors.setResolution(Config::TEMP_RETURN_ROM, Config::TEMP_RESOLUTION_BITS);
         Serial.println("DS18B20 return: found");
     } else {
         registry.setError(ChannelId::TEMP_RETURN);

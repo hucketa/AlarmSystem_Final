@@ -1,55 +1,54 @@
-
 #include <Arduino.h>
+#include <Wire.h>
 #include "Config.h"
-#include "SensorTypes.h"
+#include "DisplayManager.h"
 #include "MeasurementRegistry.h"
 #include "TemperatureSensor.h"
+#include "DisplayPages.h"
 
 // =====================================================
-// TEST SETTINGS
+// DISPLAY SETTINGS
 // =====================================================
-constexpr uint32_t SERIAL_INTERVAL_MS = 1000;
+constexpr uint8_t TEMP_LCD_ADDRESS = 0x25;
+constexpr uint8_t PRESS_LCD_ADDRESS = 0x27;
 
 // =====================================================
-// MEASUREMENTS AND SENSOR
+// MEASUREMENT PAGE CONFIGURATION
 // =====================================================
+const MeasurementField temperatureFields[] = {
+    {ChannelId::TEMP_SUPPLY, "PODACHA", 1, "C", 0.001f},
+    {ChannelId::TEMP_RETURN, "OBRATKA", 1, "C", 0.001f}
+};
+
+// =====================================================
+// MODULES
+// =====================================================
+LcdDisplay temperatureDisplay(TEMP_LCD_ADDRESS, 16, 2);
+LcdDisplay pressureDisplay(PRESS_LCD_ADDRESS, 16, 2);
+DisplayManager displayManager;
 MeasurementRegistry measurementRegistry;
 TemperatureSensor temperatureSensor(measurementRegistry);
-uint32_t lastSerialOutputMs = 0;
-
-// =====================================================
-// PRINT MEASUREMENT
-// =====================================================
-void printMeasurement(ChannelId channel, const char* name) {
-    Measurement measurement;
-    Serial.printf("%s: ", name);
-    if (!measurementRegistry.get(channel, measurement)) {
-        Serial.println("CHANNEL NOT FOUND");
-        return;
-    }
-    switch (measurement.status) {
-        case MeasurementStatus::NOT_INITIALIZED:
-            Serial.println("NOT INITIALIZED");
-            return;
-        case MeasurementStatus::ERROR:
-            Serial.println("ERROR");
-            return;
-        case MeasurementStatus::VALID:
-            Serial.printf("VALID | %.2f C | Age: %lu ms\n", measurement.value, (unsigned long)(millis() - measurement.lastUpdateMs));
-            return;
-    }
-    Serial.println("UNKNOWN");
-}
+DisplayPages displayPages(measurementRegistry, displayManager);
 
 // =====================================================
 // SETUP
 // =====================================================
 void setup() {
     Serial.begin(115200);
-    Serial.println();
-    Serial.println("================================");
-    Serial.println(" TEMPERATURE MODULE TEST");
-    Serial.println("================================");
+    Wire.begin(Config::SDA_PIN, Config::SCL_PIN);
+    displayManager.addDisplay(temperatureDisplay);
+    displayManager.addDisplay(pressureDisplay);
+    ScreenPage temperaturePage;
+    temperaturePage.setLine(0, "PODACHA: ---");
+    temperaturePage.setLine(1, "OBRATKA: ---");
+    displayManager.addPage(temperatureDisplay, temperaturePage);
+    ScreenPage pressurePage;
+    pressurePage.setLine(0, "TYSK");
+    pressurePage.setLine(1, "Ochikuvannya");
+    displayManager.addPage(pressureDisplay, pressurePage);
+    if (!displayPages.addMeasurementPage(temperatureDisplay, 0, temperatureFields, sizeof(temperatureFields) / sizeof(temperatureFields[0]))) {
+        Serial.println("ERROR: temperature page registration failed");
+    }
     temperatureSensor.begin();
 }
 
@@ -58,11 +57,6 @@ void setup() {
 // =====================================================
 void loop() {
     temperatureSensor.service();
-    uint32_t now = millis();
-    if (now - lastSerialOutputMs >= SERIAL_INTERVAL_MS) {
-        lastSerialOutputMs = now;
-        printMeasurement(ChannelId::TEMP_SUPPLY, "Supply");
-        printMeasurement(ChannelId::TEMP_RETURN, "Return");
-        Serial.println();
-    }
+    displayPages.service();
+    displayManager.service();
 }
