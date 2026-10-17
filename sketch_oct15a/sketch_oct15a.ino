@@ -5,6 +5,7 @@
 #include "MeasurementRegistry.h"
 #include "TemperatureSensor.h"
 #include "DisplayPages.h"
+#include "AlarmManager.h"
 
 // =====================================================
 // DISPLAY SETTINGS
@@ -21,6 +22,15 @@ const MeasurementField temperatureFields[] = {
 };
 
 // =====================================================
+// ALARM CONFIGURATION
+// =====================================================
+const AlarmChannelConfig alarmConfigs[] = {
+    {ChannelId::TEMP_SUPPLY, Config::POD_TEMP_WARN_LOW, Config::POD_TEMP_CRITICAL_LOW, Config::POD_TEMP_WARN_HIGH, Config::POD_TEMP_CRITICAL_HIGH, Config::TEMP_HYSTERESIS},
+    {ChannelId::TEMP_RETURN, Config::OBR_TEMP_WARN_LOW, Config::OBR_TEMP_CRITICAL_LOW, Config::OBR_TEMP_WARN_HIGH, Config::OBR_TEMP_CRITICAL_HIGH, Config::TEMP_HYSTERESIS}
+};
+constexpr uint8_t ALARM_CONFIG_COUNT = sizeof(alarmConfigs) / sizeof(alarmConfigs[0]);
+
+// =====================================================
 // MODULES
 // =====================================================
 LcdDisplay temperatureDisplay(TEMP_LCD_ADDRESS, 16, 2);
@@ -29,6 +39,7 @@ DisplayManager displayManager;
 MeasurementRegistry measurementRegistry;
 TemperatureSensor temperatureSensor(measurementRegistry);
 DisplayPages displayPages(measurementRegistry, displayManager);
+AlarmManager alarmManager(measurementRegistry, alarmConfigs, ALARM_CONFIG_COUNT);
 
 // =====================================================
 // SETUP
@@ -57,6 +68,7 @@ void setup() {
 // =====================================================
 void loop() {
     temperatureSensor.service();
+    alarmManager.service();
     displayPages.service();
     displayManager.service();
 }
