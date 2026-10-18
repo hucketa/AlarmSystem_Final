@@ -1,105 +1,205 @@
 #include "DisplayPages.h"
 #include <stdio.h>
-#include <math.h>
 #include <string.h>
-#include <limits.h>
+#include <math.h>
 
-// =====================================================
-// CONSTRUCTOR
-// =====================================================
-DisplayPages::DisplayPages(MeasurementRegistry& registry, DisplayManager& manager) : registry(registry), manager(manager), pages{} {
+DisplayPages::DisplayPages(DisplayManager& manager) : manager(manager) {
 }
 
-// =====================================================
-// REGISTER MEASUREMENT PAGE
-// =====================================================
-bool DisplayPages::addMeasurementPage(LcdDisplay& display, uint8_t pageIndex, const MeasurementField* fields, uint8_t count) {
-    int8_t pageTotal = manager.getPageCount(display);
-    if (pageTotal < 0 || pageIndex >= pageTotal || fields == nullptr || count == 0 || count > display.rowCount() || count > Config::MAX_LCD_ROWS || pageCount >= Config::MAX_DISPLAYS * Config::MAX_PAGES_PER_DISPLAY) {
-        return false;
-    }
-    for (uint8_t i = 0; i < count; i++) {
-        if (fields[i].label == nullptr || fields[i].unit == nullptr || fields[i].changeStep <= 0.0f) {
-            return false;
-        }
+bool DisplayPages::addTemplatePage(LcdDisplay& display, uint8_t pageIndex, const char* const* lines, uint8_t lineCount) {
+    int8_t total = manager.getPageCount(display);
+    if (total < 0 || pageIndex >= total || lines == nullptr || lineCount == 0 || lineCount > display.rowCount() || lineCount > Config::MAX_LCD_ROWS || pageCount >= MAX_PAGES) return false;
+    if (findPage(display, pageIndex) != nullptr) return false;
+    for (uint8_t i = 0; i < lineCount; i++) {
+        if (lines[i] == nullptr) return false;
     }
     PageState& page = pages[pageCount++];
     page.display = &display;
     page.pageIndex = pageIndex;
-    page.fields = fields;
-    page.fieldCount = count;
+    page.lineCount = lineCount;
+    for (uint8_t i = 0; i < lineCount; i++) page.lines[i] = lines[i];
     page.initialized = false;
     return true;
 }
 
-// =====================================================
-// SERVICE MEASUREMENT PAGES
-// =====================================================
-void DisplayPages::service() {
-    for (uint8_t i = 0; i < pageCount; i++) {
-        updateMeasurementPage(pages[i]);
-    }
-}
-
-// =====================================================
-// FORMAT MEASUREMENT LINE
-// =====================================================
-bool DisplayPages::formatMeasurementLine(char* buffer, size_t size, const MeasurementField& field) {
-    Measurement measurement;
-    if (!registry.get(field.channel, measurement) || measurement.status == MeasurementStatus::NOT_INITIALIZED) {
-        snprintf(buffer, size, "%s: ---", field.label);
-        return true;
-    }
-    if (measurement.status == MeasurementStatus::ERROR) {
-        snprintf(buffer, size, "%s: ERROR", field.label);
-        return true;
-    }
-    if (strcmp(field.unit, "C") == 0) {
-        snprintf(buffer, size, "%s: %.*f%cC", field.label, field.precision, measurement.value, (char)223);
-    } else {
-        snprintf(buffer, size, "%s: %.*f%s", field.label, field.precision, measurement.value, field.unit);
-    }
+bool DisplayPages::bind(LcdDisplay& display, uint8_t pageIndex, uint8_t lineIndex, Channel& channel) {
+    PageState* page = findPage(display, pageIndex);
+    if (page == nullptr || lineIndex >= page->lineCount || page->bindingCounts[lineIndex] >= MAX_BINDINGS_PER_LINE) return false;
+    uint8_t index = page->bindingCounts[lineIndex]++;
+    page->bindings[lineIndex][index] = &channel;
+    page->initialized = false;
     return true;
 }
 
-// =====================================================
-// CHECK MEASUREMENT CHANGES
-// =====================================================
-bool DisplayPages::hasMeasurementChanged(PageState& page, uint8_t fieldIndex, const Measurement& measurement) {
-    MeasurementStatus status = measurement.status;
-    int32_t value = status == MeasurementStatus::VALID ? (int32_t)roundf(measurement.value / page.fields[fieldIndex].changeStep) : INT32_MIN;
-    return !page.initialized || value != page.lastValues[fieldIndex] || status != page.lastStatuses[fieldIndex];
+void DisplayPages::setPressureUnit(PressureDisplayUnit unit) {
+    if (pressureUnit == unit) return;
+    pressureUnit = unit;
+    for (uint8_t i = 0; i < pageCount; i++) pages[i].initialized = false;
 }
 
-// =====================================================
-// UPDATE MEASUREMENT PAGE
-// =====================================================
-void DisplayPages::updateMeasurementPage(PageState& page) {
+PressureDisplayUnit DisplayPages::getPressureUnit() const {
+    return pressureUnit;
+}
+
+void DisplayPages::service() {
+    for (uint8_t i = 0; i < pageCount; i++) updatePage(pages[i]);
+}
+
+DisplayPages::PageState* DisplayPages::findPage(LcdDisplay& display, uint8_t pageIndex) {
+    for (uint8_t i = 0; i < pageCount; i++) {
+        if (pages[i].display == &display && pages[i].pageIndex == pageIndex) return &pages[i];
+    }
+    return nullptr;
+}
+
+bool DisplayPages::appendText(char* output, size_t outputSize, size_t& used, const char* text) {
+    if (text == nullptr || used >= outputSize) return false;
+    size_t length = strlen(text);
+    if (length >= outputSize - used) length = outputSize - used - 1;
+    memcpy(output + used, text, length);
+    used += length;
+    output[used] = '\0';
+    return true;
+}
+
+bool DisplayPages::appendNumber(char* output, size_t outputSize, size_t& used, float value, uint8_t precision) {
+    if (!isfinite(value)) return appendText(output, outputSize, used, "---");
+    char number[24];
+    snprintf(number, sizeof(number), "%.*f", precision, value);
+    return appendText(output, outputSize, used, number);
+}
+
+bool DisplayPages::isPressureChannel(const Channel& channel) const {
+    return channel.getUnit() != nullptr && strcmp(channel.getUnit(), "atm") == 0;
+}
+
+float DisplayPages::convertPressure(float value) const {
+    switch (pressureUnit) {
+        case PressureDisplayUnit::BAR:
+            return value * 1.01325f;
+        case PressureDisplayUnit::MPA:
+            return value * 0.101325f;
+        case PressureDisplayUnit::ATM:
+        default:
+            return value;
+    }
+}
+
+uint8_t DisplayPages::pressurePrecision(const Channel& channel) const {
+    switch (pressureUnit) {
+        case PressureDisplayUnit::BAR:
+            return 2;
+        case PressureDisplayUnit::MPA:
+            return 3;
+        case PressureDisplayUnit::ATM:
+        default:
+            return channel.getPrecision();
+    }
+}
+
+const char* DisplayPages::pressureUnitName() const {
+    switch (pressureUnit) {
+        case PressureDisplayUnit::BAR:
+            return "bar";
+        case PressureDisplayUnit::MPA:
+            return "MPa";
+        case PressureDisplayUnit::ATM:
+        default:
+            return "ATM";
+    }
+}
+
+bool DisplayPages::appendChannelName(char* output, size_t outputSize, size_t& used, const Channel& channel) {
+    return appendText(output, outputSize, used, channel.getName());
+}
+
+bool DisplayPages::appendValue(char* output, size_t outputSize, size_t& used, const Channel& channel) {
+    if (channel.getStatus() == MeasurementStatus::NOT_INITIALIZED) return appendText(output, outputSize, used, "---");
+    if (channel.getStatus() == MeasurementStatus::ERROR) return appendText(output, outputSize, used, "POMYLKA");
+    float value = channel.getValue();
+    uint8_t precision = channel.getPrecision();
+    if (isPressureChannel(channel)) {
+        value = convertPressure(value);
+        precision = pressurePrecision(channel);
+    }
+    return appendNumber(output, outputSize, used, value, precision);
+}
+
+bool DisplayPages::appendUnit(char* output, size_t outputSize, size_t& used, const Channel& channel) {
+    if (channel.getStatus() != MeasurementStatus::VALID) return true;
+    if (isPressureChannel(channel)) return appendText(output, outputSize, used, pressureUnitName());
+    if (channel.getUnit() != nullptr && strcmp(channel.getUnit(), "C") == 0) return appendText(output, outputSize, used, "\xDF" "C");
+    return appendText(output, outputSize, used, channel.getUnit());
+}
+
+bool DisplayPages::renderLine(PageState& page, uint8_t lineIndex, char* output, size_t outputSize) {
+    output[0] = '\0';
+    const char* source = page.lines[lineIndex];
+    size_t used = 0;
+    uint8_t channelIndex = 0;
+    bool channelNameSeen = false;
+    while (*source != '\0' && used < outputSize - 1) {
+        if (*source != '{') {
+            char character[2] = {*source++, '\0'};
+            if (!appendText(output, outputSize, used, character)) return false;
+            continue;
+        }
+        const char* end = strchr(source, '}');
+        if (end == nullptr) return appendText(output, outputSize, used, source);
+        size_t tokenLength = end - source - 1;
+        char token[24];
+        if (tokenLength >= sizeof(token)) return false;
+        memcpy(token, source + 1, tokenLength);
+        token[tokenLength] = '\0';
+        if (strcmp(token, "CHANEL_NAME") == 0 || strcmp(token, "CHANNEL_NAME") == 0) {
+            if (channelNameSeen) channelIndex++;
+            channelNameSeen = true;
+        }
+        if (channelIndex >= page.bindingCounts[lineIndex]) return false;
+        Channel& channel = *page.bindings[lineIndex][channelIndex];
+        bool result = true;
+        if (strcmp(token, "CHANEL_NAME") == 0 || strcmp(token, "CHANNEL_NAME") == 0) {
+            result = appendChannelName(output, outputSize, used, channel);
+        } else if (strcmp(token, "VALUE") == 0) {
+            result = appendValue(output, outputSize, used, channel);
+        } else if (strcmp(token, "UNIT") == 0) {
+            result = appendUnit(output, outputSize, used, channel);
+        } else {
+            result = appendText(output, outputSize, used, "{");
+            result = result && appendText(output, outputSize, used, token);
+            result = result && appendText(output, outputSize, used, "}");
+        }
+        if (!result) return false;
+        source = end + 1;
+    }
+    output[used] = '\0';
+    return true;
+}
+
+void DisplayPages::updatePage(PageState& page) {
     ScreenPage screenPage;
-    Measurement measurements[Config::MAX_LCD_ROWS];
-    int32_t values[Config::MAX_LCD_ROWS];
-    MeasurementStatus statuses[Config::MAX_LCD_ROWS];
     bool changed = !page.initialized;
-    for (uint8_t i = 0; i < page.fieldCount; i++) {
-        if (!registry.get(page.fields[i].channel, measurements[i])) {
-            measurements[i].value = 0.0f;
-            measurements[i].status = MeasurementStatus::NOT_INITIALIZED;
-        }
-        statuses[i] = measurements[i].status;
-        values[i] = statuses[i] == MeasurementStatus::VALID ? (int32_t)roundf(measurements[i].value / page.fields[i].changeStep) : INT32_MIN;
-        if (hasMeasurementChanged(page, i, measurements[i])) {
-            changed = true;
-        }
+    for (uint8_t row = 0; row < page.lineCount; row++) {
         char line[Config::MAX_LCD_COLS + 1];
-        formatMeasurementLine(line, sizeof(line), page.fields[i]);
-        screenPage.setLine(i, line);
+        if (!renderLine(page, row, line, sizeof(line))) snprintf(line, sizeof(line), "POMYLKA SHABLONU");
+        screenPage.setLine(row, line);
+        if (strcmp(line, page.lastLines[row]) != 0) changed = true;
+        snprintf(page.lastLines[row], sizeof(page.lastLines[row]), "%s", line);
     }
-    if (!changed || !manager.replacePage(*page.display, page.pageIndex, screenPage)) {
-        return;
+    if (changed) {
+        if (manager.replacePage(*page.display, page.pageIndex, screenPage)) page.initialized = true;
     }
-    for (uint8_t i = 0; i < page.fieldCount; i++) {
-        page.lastValues[i] = values[i];
-        page.lastStatuses[i] = statuses[i];
+}
+
+bool DisplayPages::isChannelBoundToDisplay(const LcdDisplay& display, const Channel& channel) const {
+    for (uint8_t i = 0; i < pageCount; i++) {
+        const PageState& page = pages[i];
+        if (page.display != &display) continue;
+        for (uint8_t row = 0; row < page.lineCount; row++) {
+            for (uint8_t j = 0; j < page.bindingCounts[row]; j++) {
+                if (page.bindings[row][j] == &channel) return true;
+            }
+        }
     }
-    page.initialized = true;
+    return false;
 }

@@ -1,67 +1,84 @@
 #pragma once
+
 #include <Arduino.h>
-#include "MeasurementRegistry.h"
+#include "Config.h"
+#include "Channel.h"
 
-// =====================================================
-// ALARM STATE
-// =====================================================
-enum class AlarmState : uint8_t {
-    NONE,
-    LOW_ALARM,
-    HIGH_ALARM,
-    INVALID
-};
-
-// =====================================================
-// ALARM SEVERITY
-// =====================================================
 enum class AlarmLevel : uint8_t {
-    NONE,
+    NORMAL,
     WARNING,
-    CRITICAL
+    CRITICAL,
+    SENSOR_ERROR
 };
 
-// =====================================================
-// CHANNEL ALARM CONFIGURATION
-// =====================================================
-struct AlarmChannelConfig {
-    ChannelId channel;
-    float warningLow;
-    float criticalLow;
-    float warningHigh;
-    float criticalHigh;
+
+enum class AlarmDirection : uint8_t {
+    NONE,
+    LOW_SIDE,
+    HIGH_SIDE,
+    SENSOR_ERROR
+};
+
+
+struct AlarmThresholds {
+    float normal;
+    float lowCritical;
+    float lowWarning;
+    float highWarning;
+    float highCritical;
     float hysteresis;
+    float retriggerStep;
 };
 
-// =====================================================
-// ALARM INFORMATION
-// =====================================================
 struct AlarmInfo {
-    ChannelId channel = ChannelId::TEMP_SUPPLY;
-    AlarmState state = AlarmState::NONE;
-    AlarmLevel level = AlarmLevel::NONE;
+    Channel* channel = nullptr;
+    AlarmLevel level = AlarmLevel::NORMAL;
+    AlarmDirection direction = AlarmDirection::NONE;
     float value = 0.0f;
     uint32_t changedAtMs = 0;
+    uint32_t triggerCount = 0;
+    bool active = false;
 };
 
-// =====================================================
-// ALARM MANAGER
-// =====================================================
 class AlarmManager {
 public:
-    AlarmManager(MeasurementRegistry& registry, const AlarmChannelConfig* configs, uint8_t configCount);
+    static constexpr uint8_t MAX_CHANNELS = Config::MAX_ALARM_CHANNELS;
+
+    bool addChannel(Channel& channel, const AlarmThresholds& thresholds);
     void service();
-    bool getAlarm(ChannelId channel, AlarmInfo& result) const;
+
+    bool getAlarm(const Channel& channel, AlarmInfo& result) const;
     uint8_t activeAlarmCount() const;
     bool getActiveAlarm(uint8_t index, AlarmInfo& result) const;
+
+    uint32_t getTriggerCount() const;
+    bool hasNewTrigger() const;
+    void acknowledgeTriggers();
+
 private:
-    static constexpr uint8_t CHANNEL_COUNT = static_cast<uint8_t>(ChannelId::COUNT);
-    MeasurementRegistry& registry;
-    const AlarmChannelConfig* configs;
-    uint8_t configCount;
-    AlarmInfo alarms[CHANNEL_COUNT];
-    static int8_t indexOf(ChannelId channel);
-    bool isConfigured(ChannelId channel) const;
-    void evaluateChannel(const AlarmChannelConfig& config, uint32_t now);
-    void updateAlarm(ChannelId channel, AlarmState state, AlarmLevel level, float value, uint32_t now);
+    struct AlarmEntry {
+        Channel* channel = nullptr;
+        AlarmThresholds thresholds = {};
+        AlarmInfo alarm = {};
+        float lastTriggeredValue = 0.0f;
+        bool hasTriggeredValue = false;
+    };
+
+    AlarmEntry entries[MAX_CHANNELS] = {};
+    uint8_t entryCount = 0;
+    uint32_t triggerCount = 0;
+    uint32_t acknowledgedTriggerCount = 0;
+
+    int8_t findChannel(const Channel& channel) const;
+    bool thresholdsValid(const AlarmThresholds& thresholds) const;
+
+    void evaluate(AlarmEntry& entry, uint32_t now);
+    void updateAlarm(
+        AlarmEntry& entry,
+        AlarmLevel level,
+        AlarmDirection direction,
+        float value,
+        uint32_t now
+    );
+    void registerTrigger(AlarmEntry& entry, float value);
 };

@@ -1,37 +1,116 @@
 #pragma once
+
 #include <Arduino.h>
 #include "Config.h"
+#include "Channel.h"
 #include "DisplayManager.h"
-#include "MeasurementRegistry.h"
 
-struct MeasurementField {
-    ChannelId channel;
-    const char* label;
-    uint8_t precision;
-    const char* unit;
-    float changeStep;
+enum class PressureDisplayUnit : uint8_t {
+    ATM,
+    BAR,
+    MPA
 };
 
 class DisplayPages {
 public:
-    DisplayPages(MeasurementRegistry& registry, DisplayManager& manager);
-    bool addMeasurementPage(LcdDisplay& display, uint8_t pageIndex, const MeasurementField* fields, uint8_t count);
+    explicit DisplayPages(DisplayManager& manager);
+
+    bool addTemplatePage(
+        LcdDisplay& display,
+        uint8_t pageIndex,
+        const char* const* lines,
+        uint8_t lineCount
+    );
+
+    bool bind(
+        LcdDisplay& display,
+        uint8_t pageIndex,
+        uint8_t lineIndex,
+        Channel& channel
+    );
+
+    void setPressureUnit(PressureDisplayUnit unit);
+    PressureDisplayUnit getPressureUnit() const;
+    bool isChannelBoundToDisplay(const LcdDisplay& display, const Channel& channel) const;
     void service();
+
 private:
+    static constexpr uint8_t MAX_BINDINGS_PER_LINE = Config::MAX_LCD_COLS;
+    static constexpr uint8_t MAX_PAGES =
+        Config::MAX_DISPLAYS * Config::MAX_PAGES_PER_DISPLAY;
+
     struct PageState {
         LcdDisplay* display = nullptr;
         uint8_t pageIndex = 0;
-        const MeasurementField* fields = nullptr;
-        uint8_t fieldCount = 0;
-        int32_t lastValues[Config::MAX_LCD_ROWS] = {};
-        MeasurementStatus lastStatuses[Config::MAX_LCD_ROWS] = {};
+        uint8_t lineCount = 0;
+
+        const char* lines[Config::MAX_LCD_ROWS] = {};
+
+        Channel* bindings[Config::MAX_LCD_ROWS]
+                         [MAX_BINDINGS_PER_LINE] = {};
+
+        uint8_t bindingCounts[Config::MAX_LCD_ROWS] = {};
+
+        char lastLines[Config::MAX_LCD_ROWS]
+                      [Config::MAX_LCD_COLS + 1] = {};
+
         bool initialized = false;
     };
-    MeasurementRegistry& registry;
+
     DisplayManager& manager;
-    PageState pages[Config::MAX_DISPLAYS * Config::MAX_PAGES_PER_DISPLAY];
+    PageState pages[MAX_PAGES] = {};
     uint8_t pageCount = 0;
-    bool formatMeasurementLine(char* buffer, size_t size, const MeasurementField& field);
-    bool hasMeasurementChanged(PageState& page, uint8_t fieldIndex, const Measurement& measurement);
-    void updateMeasurementPage(PageState& page);
+    PressureDisplayUnit pressureUnit = PressureDisplayUnit::ATM;
+
+    PageState* findPage(LcdDisplay& display, uint8_t pageIndex);
+
+    bool renderLine(
+        PageState& page,
+        uint8_t lineIndex,
+        char* output,
+        size_t outputSize
+    );
+
+    bool appendText(
+        char* output,
+        size_t outputSize,
+        size_t& used,
+        const char* text
+    );
+
+    bool appendValue(
+        char* output,
+        size_t outputSize,
+        size_t& used,
+        const Channel& channel
+    );
+
+    bool appendUnit(
+        char* output,
+        size_t outputSize,
+        size_t& used,
+        const Channel& channel
+    );
+
+    bool appendChannelName(
+        char* output,
+        size_t outputSize,
+        size_t& used,
+        const Channel& channel
+    );
+
+    bool appendNumber(
+        char* output,
+        size_t outputSize,
+        size_t& used,
+        float value,
+        uint8_t precision
+    );
+
+    bool isPressureChannel(const Channel& channel) const;
+
+    float convertPressure(float value) const;
+    uint8_t pressurePrecision(const Channel& channel) const;
+    const char* pressureUnitName() const;
+    void updatePage(PageState& page);
 };

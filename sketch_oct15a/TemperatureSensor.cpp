@@ -1,47 +1,50 @@
+
 #include "TemperatureSensor.h"
 #include <math.h>
+#include <string.h>
 
-// =====================================================
-// CONSTRUCTOR
-// =====================================================
-TemperatureSensor::TemperatureSensor(MeasurementRegistry& registry) : oneWire(Config::TEMP_PIN), sensors(&oneWire), registry(registry) {
+TemperatureSensor::TemperatureSensor(uint8_t pin)
+    : oneWire(pin), sensors(&oneWire) {
 }
 
-// =====================================================
-// INITIALIZE SENSORS
-// =====================================================
+bool TemperatureSensor::addSensor(const uint8_t rom[8], Channel& channel) {
+    if (started || rom == nullptr || sensorCount >= MAX_SENSORS) {
+        return false;
+    }
+    for (uint8_t i = 0; i < sensorCount; i++) {
+        if (memcmp(entries[i].rom, rom, sizeof(entries[i].rom)) == 0) {
+            return false;
+        }
+    }
+    SensorEntry& entry = entries[sensorCount];
+    memcpy(entry.rom, rom, sizeof(entry.rom));
+    entry.channel = &channel;
+    entry.configured = false;
+    sensorCount++;
+    return true;
+}
+
 void TemperatureSensor::begin() {
     sensors.begin();
     sensors.setWaitForConversion(false);
-    bool supplyFound = sensors.isConnected(Config::TEMP_SUPPLY_ROM);
-    bool returnFound = sensors.isConnected(Config::TEMP_RETURN_ROM);
-    if (supplyFound) {
-        sensors.setResolution(Config::TEMP_SUPPLY_ROM, Config::TEMP_RESOLUTION_BITS);
-        Serial.println("DS18B20 supply: found");
-    } else {
-        registry.setError(ChannelId::TEMP_SUPPLY);
-        Serial.println("DS18B20 supply: NOT FOUND");
+    started = true;
+    for (uint8_t i = 0; i < sensorCount; i++) {
+        if (configureSensor(entries[i])) {
+            Serial.print("DS18B20 ");
+            Serial.print(entries[i].channel->getName());
+            Serial.println(": found");
+        } else {
+            entries[i].channel->setError(millis());
+            Serial.print("DS18B20 ");
+            Serial.print(entries[i].channel->getName());
+            Serial.println(": NOT FOUND");
+        }
     }
-    if (returnFound) {
-        sensors.setResolution(Config::TEMP_RETURN_ROM, Config::TEMP_RESOLUTION_BITS);
-        Serial.println("DS18B20 return: found");
-    } else {
-        registry.setError(ChannelId::TEMP_RETURN);
-        Serial.println("DS18B20 return: NOT FOUND");
-    }
-    initialized = supplyFound || returnFound;
-    if (initialized) {
-        startConversion(millis());
-    } else {
-        Serial.println("DS18B20: no configured sensors found");
-    }
+    startConversion(millis());
 }
 
-// =====================================================
-// SERVICE SENSORS
-// =====================================================
 void TemperatureSensor::service() {
-    if (!initialized) {
+    if (!started) {
         return;
     }
     uint32_t now = millis();
@@ -54,38 +57,43 @@ void TemperatureSensor::service() {
     startConversion(now);
 }
 
-// =====================================================
-// READ MEASUREMENTS
-// =====================================================
 void TemperatureSensor::readMeasurements(uint32_t timestamp) {
-    float temperature;
-    if (sensors.isConnected(Config::TEMP_SUPPLY_ROM)) {
-        temperature = sensors.getTempC(Config::TEMP_SUPPLY_ROM);
-        if (temperature != DEVICE_DISCONNECTED_C && isfinite(temperature) && temperature >= -55.0f && temperature <= 125.0f) {
-            registry.update(ChannelId::TEMP_SUPPLY, temperature, timestamp);
-        } else {
-            registry.setError(ChannelId::TEMP_SUPPLY);
+    for (uint8_t i = 0; i < sensorCount; i++) {
+        SensorEntry& entry = entries[i];
+        if (!sensors.isConnected(entry.rom)) {
+            entry.configured = false;
+            entry.channel->setError(timestamp);
+            continue;
         }
-    } else {
-        registry.setError(ChannelId::TEMP_SUPPLY);
-    }
-    if (sensors.isConnected(Config::TEMP_RETURN_ROM)) {
-        temperature = sensors.getTempC(Config::TEMP_RETURN_ROM);
-        if (temperature != DEVICE_DISCONNECTED_C && isfinite(temperature) && temperature >= -55.0f && temperature <= 125.0f) {
-            registry.update(ChannelId::TEMP_RETURN, temperature, timestamp);
-        } else {
-            registry.setError(ChannelId::TEMP_RETURN);
+        if (!entry.configured) {
+            configureSensor(entry);
+            entry.channel->setError(timestamp);
+            continue;
         }
-    } else {
-        registry.setError(ChannelId::TEMP_RETURN);
+        float temperature = sensors.getTempC(entry.rom);
+        if (temperature != DEVICE_DISCONNECTED_C &&
+            isfinite(temperature) &&
+            temperature >= -55.0f &&
+            temperature <= 125.0f) {
+            entry.channel->updateValue(temperature, timestamp);
+        } else {
+            entry.channel->setError(timestamp);
+        }
     }
 }
 
-// =====================================================
-// START ASYNCHRONOUS CONVERSION
-// =====================================================
 void TemperatureSensor::startConversion(uint32_t timestamp) {
-    conversionStartedMs = timestamp;
     sensors.requestTemperatures();
+    conversionStartedMs = timestamp;
     conversionPending = true;
+}
+
+bool TemperatureSensor::configureSensor(SensorEntry& entry) {
+    if (!sensors.isConnected(entry.rom)) {
+        entry.configured = false;
+        return false;
+    }
+    sensors.setResolution(entry.rom, Config::TEMP_RESOLUTION_BITS);
+    entry.configured = true;
+    return true;
 }

@@ -1,112 +1,117 @@
 #include "AlarmManager.h"
 #include <math.h>
 
-// =====================================================
-// CONSTRUCTOR
-// =====================================================
-AlarmManager::AlarmManager(MeasurementRegistry& registry, const AlarmChannelConfig* configs, uint8_t configCount)
-    : registry(registry), configs(configs), configCount(configs == nullptr ? 0 : configCount), alarms{} {
-    for (uint8_t i = 0; i < CHANNEL_COUNT; i++) {
-        alarms[i].channel = static_cast<ChannelId>(i);
-    }
-}
-
-// =====================================================
-// SERVICE
-// =====================================================
-void AlarmManager::service() {
-    uint32_t now = millis();
-    for (uint8_t i = 0; i < configCount; i++) {
-        const AlarmChannelConfig& config = configs[i];
-        if (!isConfigured(config.channel)) continue;
-        if (!isfinite(config.warningLow) || !isfinite(config.criticalLow) || !isfinite(config.warningHigh) || !isfinite(config.criticalHigh) || !isfinite(config.hysteresis)) continue;
-        if (config.criticalLow > config.warningLow || config.warningLow >= config.warningHigh || config.warningHigh > config.criticalHigh || config.hysteresis < 0.0f) continue;
-        evaluateChannel(config, now);
-    }
-}
-
-// =====================================================
-// EVALUATE CHANNEL
-// =====================================================
-void AlarmManager::evaluateChannel(const AlarmChannelConfig& config, uint32_t now) {
-    Measurement measurement;
-    if (!registry.get(config.channel, measurement)) return;
-    if (measurement.status == MeasurementStatus::NOT_INITIALIZED) return;
-    if (measurement.status == MeasurementStatus::ERROR) {
-        updateAlarm(config.channel, AlarmState::INVALID, AlarmLevel::CRITICAL, measurement.value, now);
-        return;
-    }
-    float warningLow = config.warningLow;
-    float criticalLow = config.criticalLow;
-    float warningHigh = config.warningHigh;
-    float criticalHigh = config.criticalHigh;
-    AlarmInfo previous;
-    if (getAlarm(config.channel, previous)) {
-        if (previous.state == AlarmState::LOW_ALARM) {
-            warningLow += config.hysteresis;
-            criticalLow += config.hysteresis;
-        } else if (previous.state == AlarmState::HIGH_ALARM) {
-            warningHigh -= config.hysteresis;
-            criticalHigh -= config.hysteresis;
-        }
-    }
-    if (measurement.value < warningLow) {
-        AlarmLevel level = measurement.value <= criticalLow ? AlarmLevel::CRITICAL : AlarmLevel::WARNING;
-        updateAlarm(config.channel, AlarmState::LOW_ALARM, level, measurement.value, now);
-    } else if (measurement.value > warningHigh) {
-        AlarmLevel level = measurement.value >= criticalHigh ? AlarmLevel::CRITICAL : AlarmLevel::WARNING;
-        updateAlarm(config.channel, AlarmState::HIGH_ALARM, level, measurement.value, now);
-    } else {
-        updateAlarm(config.channel, AlarmState::NONE, AlarmLevel::NONE, measurement.value, now);
-    }
-}
-
-// =====================================================
-// UPDATE ALARM
-// =====================================================
-void AlarmManager::updateAlarm(ChannelId channel, AlarmState state, AlarmLevel level, float value, uint32_t now) {
-    int8_t index = indexOf(channel);
-    if (index < 0) return;
-    AlarmInfo& alarm = alarms[index];
-    if (alarm.state != state || alarm.level != level) alarm.changedAtMs = now;
-    alarm.channel = channel;
-    alarm.state = state;
-    alarm.level = level;
-    alarm.value = value;
-}
-
-// =====================================================
-// GET ALARM
-// =====================================================
-bool AlarmManager::getAlarm(ChannelId channel, AlarmInfo& result) const {
-    int8_t index = indexOf(channel);
-    if (index < 0 || !isConfigured(channel)) return false;
-    result = alarms[index];
+bool AlarmManager::addChannel(Channel& channel, const AlarmThresholds& thresholds) {
+    if (entryCount >= MAX_CHANNELS || findChannel(channel) >= 0 || !thresholdsValid(thresholds)) return false;
+    AlarmEntry& entry = entries[entryCount++];
+    entry.channel = &channel;
+    entry.thresholds = thresholds;
+    entry.alarm.channel = &channel;
+    entry.alarm.level = AlarmLevel::NORMAL;
+    entry.alarm.direction = AlarmDirection::NONE;
+    entry.alarm.value = channel.getValue();
+    entry.alarm.active = false;
     return true;
 }
 
-// =====================================================
-// COUNT ACTIVE ALARMS
-// =====================================================
+void AlarmManager::service() {
+    const uint32_t now = millis();
+    for (uint8_t i = 0; i < entryCount; i++) evaluate(entries[i], now);
+}
+
+void AlarmManager::evaluate(AlarmEntry& entry, uint32_t now) {
+    Channel& channel = *entry.channel;
+    const AlarmInfo& previous = entry.alarm;
+    const MeasurementStatus status = channel.getStatus();
+    if (status == MeasurementStatus::NOT_INITIALIZED) return;
+    if (status == MeasurementStatus::ERROR) {
+        updateAlarm(entry, AlarmLevel::SENSOR_ERROR, AlarmDirection::SENSOR_ERROR, channel.getValue(), now);
+        return;
+    }
+    const AlarmThresholds& t = entry.thresholds;
+    const float value = channel.getValue();
+    AlarmLevel level = AlarmLevel::NORMAL;
+    AlarmDirection direction = AlarmDirection::NONE;
+    if (value <= t.lowCritical) {
+        level = AlarmLevel::CRITICAL;
+        direction = AlarmDirection::LOW_SIDE;
+    } else if (previous.direction == AlarmDirection::LOW_SIDE && previous.level == AlarmLevel::CRITICAL && value <= t.lowCritical + t.hysteresis) {
+        level = AlarmLevel::CRITICAL;
+        direction = AlarmDirection::LOW_SIDE;
+    } else if (value < t.lowWarning) {
+        level = AlarmLevel::WARNING;
+        direction = AlarmDirection::LOW_SIDE;
+    } else if (previous.direction == AlarmDirection::LOW_SIDE && previous.level == AlarmLevel::WARNING && value < t.lowWarning + t.hysteresis) {
+        level = AlarmLevel::WARNING;
+        direction = AlarmDirection::LOW_SIDE;
+    }
+    if (direction == AlarmDirection::NONE) {
+        if (value >= t.highCritical) {
+            level = AlarmLevel::CRITICAL;
+            direction = AlarmDirection::HIGH_SIDE;
+        } else if (previous.direction == AlarmDirection::HIGH_SIDE && previous.level == AlarmLevel::CRITICAL && value >= t.highCritical - t.hysteresis) {
+            level = AlarmLevel::CRITICAL;
+            direction = AlarmDirection::HIGH_SIDE;
+        } else if (value > t.highWarning) {
+            level = AlarmLevel::WARNING;
+            direction = AlarmDirection::HIGH_SIDE;
+        } else if (previous.direction == AlarmDirection::HIGH_SIDE && previous.level == AlarmLevel::WARNING && value > t.highWarning - t.hysteresis) {
+            level = AlarmLevel::WARNING;
+            direction = AlarmDirection::HIGH_SIDE;
+        }
+    }
+    updateAlarm(entry, level, direction, value, now);
+}
+
+void AlarmManager::updateAlarm(AlarmEntry& entry, AlarmLevel level, AlarmDirection direction, float value, uint32_t now) {
+    AlarmInfo& alarm = entry.alarm;
+    const bool stateChanged = level != alarm.level || direction != alarm.direction;
+    if (stateChanged) alarm.changedAtMs = now;
+    alarm.level = level;
+    alarm.direction = direction;
+    alarm.value = value;
+    alarm.active = level != AlarmLevel::NORMAL;
+    if (!alarm.active) {
+        entry.hasTriggeredValue = false;
+        return;
+    }
+    bool trigger = stateChanged;
+    const float step = entry.thresholds.retriggerStep;
+    if (!trigger && entry.hasTriggeredValue && step > 0.0f && level != AlarmLevel::SENSOR_ERROR) {
+        const float difference = value - entry.lastTriggeredValue;
+        trigger = (direction == AlarmDirection::LOW_SIDE && difference <= -step) || (direction == AlarmDirection::HIGH_SIDE && difference >= step);
+    }
+    if (trigger) registerTrigger(entry, value);
+}
+
+void AlarmManager::registerTrigger(AlarmEntry& entry, float value) {
+    triggerCount++;
+    entry.alarm.triggerCount++;
+    entry.lastTriggeredValue = value;
+    entry.hasTriggeredValue = true;
+}
+
+bool AlarmManager::getAlarm(const Channel& channel, AlarmInfo& result) const {
+    const int8_t index = findChannel(channel);
+    if (index < 0) return false;
+    result = entries[index].alarm;
+    return true;
+}
+
 uint8_t AlarmManager::activeAlarmCount() const {
     uint8_t count = 0;
-    for (uint8_t i = 0; i < configCount; i++) {
-        AlarmInfo alarm;
-        if (getAlarm(configs[i].channel, alarm) && alarm.level != AlarmLevel::NONE) count++;
+    for (uint8_t i = 0; i < entryCount; i++) {
+        if (entries[i].alarm.active) count++;
     }
     return count;
 }
 
-// =====================================================
-// GET ACTIVE ALARM BY INDEX
-// =====================================================
 bool AlarmManager::getActiveAlarm(uint8_t index, AlarmInfo& result) const {
     uint8_t current = 0;
-    for (uint8_t i = 0; i < configCount; i++) {
-        AlarmInfo alarm;
-        if (!getAlarm(configs[i].channel, alarm) || alarm.level == AlarmLevel::NONE) continue;
+    for (uint8_t i = 0; i < entryCount; i++) {
+        if (!entries[i].alarm.active) continue;
         if (current == index) {
-            result = alarm;
+            result = entries[i].alarm;
             return true;
         }
         current++;
@@ -114,22 +119,26 @@ bool AlarmManager::getActiveAlarm(uint8_t index, AlarmInfo& result) const {
     return false;
 }
 
-// =====================================================
-// CHECK CHANNEL CONFIGURATION
-// =====================================================
-bool AlarmManager::isConfigured(ChannelId channel) const {
-    if (static_cast<uint8_t>(channel) >= CHANNEL_COUNT) return false;
-    for (uint8_t i = 0; i < configCount; i++) {
-        if (configs[i].channel == channel) return true;
-    }
-    return false;
+uint32_t AlarmManager::getTriggerCount() const {
+    return triggerCount;
 }
 
-// =====================================================
-// CHANNEL INDEX
-// =====================================================
-int8_t AlarmManager::indexOf(ChannelId channel) {
-    uint8_t index = static_cast<uint8_t>(channel);
-    if (index >= CHANNEL_COUNT) return -1;
-    return static_cast<int8_t>(index);
+bool AlarmManager::hasNewTrigger() const {
+    return triggerCount != acknowledgedTriggerCount;
+}
+
+void AlarmManager::acknowledgeTriggers() {
+    acknowledgedTriggerCount = triggerCount;
+}
+
+int8_t AlarmManager::findChannel(const Channel& channel) const {
+    for (uint8_t i = 0; i < entryCount; i++) {
+        if (entries[i].channel == &channel) return static_cast<int8_t>(i);
+    }
+    return -1;
+}
+
+bool AlarmManager::thresholdsValid(const AlarmThresholds& t) const {
+    if (!isfinite(t.normal) || !isfinite(t.lowCritical) || !isfinite(t.lowWarning) || !isfinite(t.highWarning) || !isfinite(t.highCritical) || !isfinite(t.hysteresis) || !isfinite(t.retriggerStep)) return false;
+    return t.lowCritical < t.lowWarning && t.lowWarning < t.normal && t.normal < t.highWarning && t.highWarning < t.highCritical && t.hysteresis >= 0.0f && t.retriggerStep >= 0.0f;
 }
