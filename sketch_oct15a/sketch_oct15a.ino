@@ -6,7 +6,9 @@
 #include "DisplayPages.h"
 #include "TemperatureSensor.h"
 #include "AlarmManager.h"
+#include "BuzzerManager.h"
 #include "AlarmDisplay.h"
+#include "LedManager.h"
 
 constexpr uint8_t TEMP_LCD_ADDRESS = 0x25;
 constexpr uint8_t PRESS_LCD_ADDRESS = 0x27;
@@ -43,6 +45,8 @@ DisplayPages displayPages(displayManager);
 TemperatureSensor temperatureSensor;
 AlarmManager alarmManager;
 AlarmDisplay alarmDisplay(alarmManager, displayManager, displayPages);
+BuzzerManager buzzerManager;
+LedManager ledManager(alarmManager);
 
 bool setupTemperaturePage() {
     ScreenPage page;
@@ -84,12 +88,18 @@ bool initializeSystem() {
 
 void setup() {
     Serial.begin(115200);
+    buzzerManager.begin();
+    ledManager.addChannel(LedGroup::TEMPERATURE, supplyTemperature);
+    ledManager.addChannel(LedGroup::TEMPERATURE, returnTemperature);
+    ledManager.begin();
     initializeSystem();
 }
 
 void loop() {
     temperatureSensor.service();
     alarmManager.service();
+    buzzerManager.service();
+    ledManager.service();
     displayPages.service();
     alarmDisplay.service();
     displayManager.service();

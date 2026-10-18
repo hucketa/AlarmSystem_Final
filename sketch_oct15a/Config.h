@@ -94,4 +94,15 @@ constexpr float OBR_PRESS_WARN_HIGH = 2.5f;
 constexpr float OBR_PRESS_CRITICAL_HIGH = 3.0f;
 constexpr float OBR_PRESS_RETRIGGER_STEP = 0.1f;
 
+// =====================================================
+// BUZZER AND BUTTON
+// =====================================================
+constexpr uint8_t BUZZER_PIN = 126;
+constexpr uint8_t BUTTON_PIN = 128;
+constexpr uint32_t BUTTON_DEBOUNCE_MS = 40;
+
+constexpr uint8_t TEMP_LED_PIN = 20 /* GPIO светодиода температуры */;
+constexpr uint8_t PRESSURE_LED_PIN = 21 /* GPIO светодиода давления */;
+constexpr uint32_t LED_BLINK_INTERVAL_MS = 500;
+
 }
