@@ -2,16 +2,12 @@
 
 bool LedManager::addChannel(LedGroup group, Channel& channel) {
     LedState* led = nullptr;
-
     if (group == LedGroup::TEMPERATURE) led = &temperatureLed;
     else if (group == LedGroup::PRESSURE) led = &pressureLed;
-
     if (led == nullptr || led->channelCount >= MAX_CHANNELS_PER_LED) return false;
-
     for (uint8_t i = 0; i < led->channelCount; i++) {
         if (led->channels[i] == &channel) return false;
     }
-
     led->channels[led->channelCount++] = &channel;
     return true;
 }
@@ -36,15 +32,12 @@ void LedManager::service() {
 void LedManager::updateLed(LedState& led, uint32_t now) {
     bool hasWarning = false;
     bool hasCritical = false;
-
     for (uint8_t i = 0; i < led.channelCount; i++) {
         AlarmInfo alarm;
         if (!alarmManager.getAlarm(*led.channels[i], alarm) || !alarm.active) continue;
-
         if (alarm.level == AlarmLevel::WARNING) hasWarning = true;
         if (alarm.level == AlarmLevel::CRITICAL || alarm.level == AlarmLevel::SENSOR_ERROR) hasCritical = true;
     }
-
     if (hasWarning && !hasCritical) {
         if (now - led.lastBlinkAt >= Config::LED_BLINK_INTERVAL_MS) {
             led.lastBlinkAt = now;
@@ -54,7 +47,6 @@ void LedManager::updateLed(LedState& led, uint32_t now) {
         led.blinkState = false;
         led.lastBlinkAt = now;
     }
-
     const bool ledOn = hasCritical || (hasWarning && led.blinkState);
     digitalWrite(led.pin, ledOn ? HIGH : LOW);
 }

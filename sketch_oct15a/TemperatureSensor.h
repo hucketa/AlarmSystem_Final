@@ -10,7 +10,6 @@
 class TemperatureSensor {
 public:
     explicit TemperatureSensor(uint8_t pin = Config::TEMP_PIN);
-
     bool addSensor(const uint8_t rom[8], Channel& channel);
     void begin();
     void service();
@@ -21,9 +20,7 @@ private:
         Channel* channel = nullptr;
         bool configured = false;
     };
-
     static constexpr uint8_t MAX_SENSORS = 8;
-
     OneWire oneWire;
     DallasTemperature sensors;
     SensorEntry entries[MAX_SENSORS];
@@ -31,7 +28,6 @@ private:
     uint32_t conversionStartedMs = 0;
     bool conversionPending = false;
     bool started = false;
-
     void readMeasurements(uint32_t timestamp);
     void startConversion(uint32_t timestamp);
     bool configureSensor(SensorEntry& entry);

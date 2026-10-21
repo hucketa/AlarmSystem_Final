@@ -1,4 +1,3 @@
-
 #include "AlarmDisplay.h"
 #include <stdio.h>
 #include <string.h>

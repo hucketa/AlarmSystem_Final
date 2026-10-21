@@ -18,7 +18,6 @@ public:
 
 private:
     static constexpr uint8_t MAX_CHANNELS_PER_LED = 5;
-
     struct LedState {
         uint8_t pin;
         Channel* channels[MAX_CHANNELS_PER_LED] = {};
@@ -26,10 +25,8 @@ private:
         bool blinkState = false;
         uint32_t lastBlinkAt = 0;
     };
-
     AlarmManager& alarmManager;
     LedState temperatureLed = {Config::TEMP_LED_PIN};
     LedState pressureLed = {Config::PRESSURE_LED_PIN};
-
     void updateLed(LedState& led, uint32_t now);
 };

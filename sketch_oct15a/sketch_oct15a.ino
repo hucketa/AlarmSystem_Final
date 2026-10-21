@@ -103,33 +103,23 @@ bool setupPressurePage() {
 // =====================================================
 bool initializeSystem() {
     Wire.begin(Config::SDA_PIN, Config::SCL_PIN);
-    if (!displayManager.addDisplay(temperatureDisplay)) Serial.println("ERROR: temperature LCD registration failed");
-    if (!displayManager.addDisplay(pressureDisplay)) Serial.println("ERROR: pressure LCD registration failed");
-    if (!setupTemperaturePage()) Serial.println("ERROR: temperature page setup failed");
-    if (!setupPressurePage()) Serial.println("ERROR: pressure page setup failed");
-    if (!alarmManager.addChannel(supplyTemperature, supplyTemperatureAlarms)) Serial.println("ERROR: supply temperature alarm setup failed");
-    if (!alarmManager.addChannel(returnTemperature, returnTemperatureAlarms)) Serial.println("ERROR: return temperature alarm setup failed");
-    if (!alarmManager.addChannel(cityPressure, cityPressureAlarms)) Serial.println("ERROR: city pressure alarm setup failed");
-    if (!alarmManager.addChannel(supplyPressure, supplyPressureAlarms)) Serial.println("ERROR: supply pressure alarm setup failed");
-    if (!alarmManager.addChannel(returnPressure, returnPressureAlarms)) Serial.println("ERROR: return pressure alarm setup failed");
-    if (!temperatureSensor.addSensor(Config::TEMP_SUPPLY_ROM, supplyTemperature)) Serial.println("ERROR: supply temperature sensor registration failed");
-    if (!temperatureSensor.addSensor(Config::TEMP_RETURN_ROM, returnTemperature)) Serial.println("ERROR: return temperature sensor registration failed");
-    if (!alarmDisplay.addDisplay(temperatureDisplay)) Serial.println("ERROR: temperature alarm display setup failed");
-    if (!alarmDisplay.addDisplay(pressureDisplay)) Serial.println("ERROR: pressure alarm display setup failed");
+    displayManager.addDisplay(temperatureDisplay);
+    displayManager.addDisplay(pressureDisplay);
+    setupTemperaturePage();
+    setupPressurePage();
+    alarmManager.addChannel(supplyTemperature, supplyTemperatureAlarms);
+    alarmManager.addChannel(returnTemperature, returnTemperatureAlarms);
+    alarmManager.addChannel(cityPressure, cityPressureAlarms);
+    alarmManager.addChannel(supplyPressure, supplyPressureAlarms);
+    alarmManager.addChannel(returnPressure, returnPressureAlarms);
+    temperatureSensor.addSensor(Config::TEMP_SUPPLY_ROM, supplyTemperature);
+    temperatureSensor.addSensor(Config::TEMP_RETURN_ROM, returnTemperature);
+    alarmDisplay.addDisplay(temperatureDisplay);
+    alarmDisplay.addDisplay(pressureDisplay);
     temperatureSensor.begin();
     supplyPressureSensor.begin();
     returnPressureSensor.begin();
     cityPressureSensor.begin();
-    Serial.println();
-    Serial.println("===== BOILER MONITORING SYSTEM =====");
-    Serial.println("Temperature LCD: initialized");
-    Serial.println("Pressure LCD: initialized");
-    Serial.println("Temperature alarms: 2");
-    Serial.println("Pressure alarms: 3");
-    Serial.println("Pressure GPIO: GOR=3, POD=0, OBR=1");
-    Serial.println("Pressure calibration: Config.h");
-    Serial.println("Serial Monitor: 115200 baud");
-    Serial.println("====================================");
     return true;
 }
 
@@ -137,7 +127,6 @@ bool initializeSystem() {
 // SETUP
 // =====================================================
 void setup() {
-    Serial.begin(115200);
     buzzerManager.begin();
     ledManager.addChannel(LedGroup::TEMPERATURE, supplyTemperature);
     ledManager.addChannel(LedGroup::TEMPERATURE, returnTemperature);
