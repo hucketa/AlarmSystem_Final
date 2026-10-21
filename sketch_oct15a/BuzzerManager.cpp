@@ -6,9 +6,7 @@ void BuzzerManager::begin() {
     pinMode(Config::BUZZER_PIN, OUTPUT);
     digitalWrite(Config::BUZZER_PIN, LOW);
     pinMode(Config::BUTTON_PIN, INPUT_PULLUP);
-    buttonRawState = digitalRead(Config::BUTTON_PIN);
-    buttonStableState = buttonRawState;
-    buttonChangedAt = millis();
+    lastButtonState = digitalRead(Config::BUTTON_PIN);
     muted = false;
     clickCount = 0;
     lastClickAt = 0;
@@ -34,22 +32,13 @@ void BuzzerManager::service() {
 
 void BuzzerManager::serviceButton(uint32_t now) {
     const bool reading = digitalRead(Config::BUTTON_PIN);
-    if (clickCount > 0 && now - lastClickAt > MULTI_CLICK_INTERVAL_MS) clickCount = 0;
-    if (reading != buttonRawState) {
-        buttonRawState = reading;
-        buttonChangedAt = now;
-    }
-    if (now - buttonChangedAt < Config::BUTTON_DEBOUNCE_MS) return;
-    if (buttonStableState == buttonRawState) return;
-    buttonStableState = buttonRawState;
-    if (buttonStableState != LOW) return;
+    if (reading == lastButtonState) return;
+    lastButtonState = reading;
+    if (reading != LOW) return;
     if (alarmManager.activeAlarmCount() > 0) muted = true;
-    if (clickCount == 0 || now - lastClickAt > MULTI_CLICK_INTERVAL_MS) clickCount = 1;
-    else clickCount++;
-    lastClickAt = now;
-    if (clickCount >= 3) {
-        triplePressDetected = true;
+    if (++clickCount >= 3) {
         clickCount = 0;
+        triplePressDetected = true;
     }
 }
 

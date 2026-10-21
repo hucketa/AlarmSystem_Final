@@ -90,7 +90,7 @@ bool setupPressurePage() {
     page.setLine(0, "GOR:----");
     page.setLine(1, "POD:--- OBR:---");
     if (!displayManager.addPage(pressureDisplay, page)) return false;
-    const char* const lines[] = {"GOR:{VALUE}", "{CHANNEL_NAME}:{VALUE} {CHANNEL_NAME}:{VALUE}"};
+    const char* const lines[] = {"GOR:{VALUE} {UNIT}", "{CHANNEL_NAME}:{VALUE} {CHANNEL_NAME}:{VALUE}"};
     if (!displayPages.addTemplatePage(pressureDisplay, 0, lines, 2)) return false;
     if (!displayPages.bind(pressureDisplay, 0, 0, cityPressure)) return false;
     if (!displayPages.bind(pressureDisplay, 0, 1, supplyPressure)) return false;
@@ -147,14 +147,7 @@ void loop() {
     cityPressureSensor.service();
     alarmManager.service();
     buzzerManager.service();
-    const PressureDisplayUnit units[] = {
-        PressureDisplayUnit::ATM,
-        PressureDisplayUnit::BAR,
-        PressureDisplayUnit::MPA
-    };
-    PressureDisplayUnit current = displayPages.getPressureUnit();
-    uint8_t next = (static_cast<uint8_t>(current) + 1) % 3;
-    displayPages.setPressureUnit(units[next]);
+    if (buzzerManager.consumeTriplePress()) displayPages.nextPressureUnit();
     ledManager.service();
     displayPages.service();
     alarmDisplay.service();

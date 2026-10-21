@@ -5,10 +5,13 @@
 #include "Channel.h"
 #include "DisplayManager.h"
 
+// Единицы только для ОТОБРАЖЕНИЯ. Внутри системы давление всегда в атм.
+// COUNT всегда последним (не единица, нужен для циклического переключения).
 enum class PressureDisplayUnit : uint8_t {
     ATM,
     BAR,
-    MPA
+    MPA,
+    COUNT
 };
 
 class DisplayPages {
@@ -31,6 +34,16 @@ public:
 
     void setPressureUnit(PressureDisplayUnit unit);
     PressureDisplayUnit getPressureUnit() const;
+    void nextPressureUnit();
+
+    // "значение единица" в текущих единицах отображения (для страницы аварии)
+    void formatValueWithUnit(
+        const Channel& channel,
+        float value,
+        char* output,
+        size_t outputSize
+    ) const;
+
     bool isChannelBoundToDisplay(const LcdDisplay& display, const Channel& channel) const;
     void service();
 
@@ -109,8 +122,13 @@ private:
 
     bool isPressureChannel(const Channel& channel) const;
 
+    // Единственное место правил отображения (используют и шаблоны, и страница аварии)
+    float displayValue(const Channel& channel, float value) const;
+    uint8_t displayPrecision(const Channel& channel) const;
+    const char* displayUnit(const Channel& channel) const;
+
     float convertPressure(float value) const;
-    uint8_t pressurePrecision(const Channel& channel) const;
+    uint8_t pressurePrecision() const;
     const char* pressureUnitName() const;
     void updatePage(PageState& page);
 };

@@ -78,6 +78,13 @@ constexpr float OBR_TEMP_RETRIGGER_STEP = 1.0f;
 // =====================================================
 constexpr float PRESSURE_HYSTERESIS = 0.05f;
 
+// Знаков после запятой при ОТОБРАЖЕНИИ давления (только экран, не влияет на измерения и аварии).
+// ATM строго десятые. Для BAR/MPA подобрано так, чтобы строка "POD:x.x OBR:x.x"
+// влезала в 16 символов (на значение максимум 3 символа).
+constexpr uint8_t PRESSURE_DECIMALS_ATM = 1;
+constexpr uint8_t PRESSURE_DECIMALS_BAR = 1;
+constexpr uint8_t PRESSURE_DECIMALS_MPA = 1;
+
 // City water pressure
 constexpr float CITY_PRESS_NORMAL = 2.0f;
 constexpr float CITY_PRESS_CRITICAL_LOW = 0.5f;

@@ -41,6 +41,11 @@ PressureDisplayUnit DisplayPages::getPressureUnit() const {
     return pressureUnit;
 }
 
+void DisplayPages::nextPressureUnit() {
+    const uint8_t next = (static_cast<uint8_t>(pressureUnit) + 1) % static_cast<uint8_t>(PressureDisplayUnit::COUNT);
+    setPressureUnit(static_cast<PressureDisplayUnit>(next));
+}
+
 void DisplayPages::service() {
     for (uint8_t i = 0; i < pageCount; i++) updatePage(pages[i]);
 }
@@ -69,6 +74,9 @@ bool DisplayPages::appendNumber(char* output, size_t outputSize, size_t& used, f
     return appendText(output, outputSize, used, number);
 }
 
+// =====================================================
+// ПРАВИЛА ОТОБРАЖЕНИЯ (единое место)
+// =====================================================
 bool DisplayPages::isPressureChannel(const Channel& channel) const {
     return channel.getUnit() != nullptr && strcmp(channel.getUnit(), "atm") == 0;
 }
@@ -85,15 +93,15 @@ float DisplayPages::convertPressure(float value) const {
     }
 }
 
-uint8_t DisplayPages::pressurePrecision(const Channel& channel) const {
+uint8_t DisplayPages::pressurePrecision() const {
     switch (pressureUnit) {
         case PressureDisplayUnit::BAR:
-            return 2;
+            return Config::PRESSURE_DECIMALS_BAR;
         case PressureDisplayUnit::MPA:
-            return 3;
+            return Config::PRESSURE_DECIMALS_MPA;
         case PressureDisplayUnit::ATM:
         default:
-            return channel.getPrecision();
+            return Config::PRESSURE_DECIMALS_ATM;
     }
 }
 
@@ -109,6 +117,29 @@ const char* DisplayPages::pressureUnitName() const {
     }
 }
 
+float DisplayPages::displayValue(const Channel& channel, float value) const {
+    return isPressureChannel(channel) ? convertPressure(value) : value;
+}
+
+uint8_t DisplayPages::displayPrecision(const Channel& channel) const {
+    return isPressureChannel(channel) ? pressurePrecision() : channel.getPrecision();
+}
+
+const char* DisplayPages::displayUnit(const Channel& channel) const {
+    if (isPressureChannel(channel)) return pressureUnitName();
+    const char* unit = channel.getUnit();
+    if (unit == nullptr) return "";
+    if (strcmp(unit, "C") == 0) return "\xDF" "C";
+    return unit;
+}
+
+void DisplayPages::formatValueWithUnit(const Channel& channel, float value, char* output, size_t outputSize) const {
+    snprintf(output, outputSize, "%.*f %s", displayPrecision(channel), displayValue(channel, value), displayUnit(channel));
+}
+
+// =====================================================
+// ТОКЕНЫ ШАБЛОНА
+// =====================================================
 bool DisplayPages::appendChannelName(char* output, size_t outputSize, size_t& used, const Channel& channel) {
     return appendText(output, outputSize, used, channel.getName());
 }
@@ -116,20 +147,12 @@ bool DisplayPages::appendChannelName(char* output, size_t outputSize, size_t& us
 bool DisplayPages::appendValue(char* output, size_t outputSize, size_t& used, const Channel& channel) {
     if (channel.getStatus() == MeasurementStatus::NOT_INITIALIZED) return appendText(output, outputSize, used, "---");
     if (channel.getStatus() == MeasurementStatus::ERROR) return appendText(output, outputSize, used, "POMYLKA");
-    float value = channel.getValue();
-    uint8_t precision = channel.getPrecision();
-    if (isPressureChannel(channel)) {
-        value = convertPressure(value);
-        precision = pressurePrecision(channel);
-    }
-    return appendNumber(output, outputSize, used, value, precision);
+    return appendNumber(output, outputSize, used, displayValue(channel, channel.getValue()), displayPrecision(channel));
 }
 
 bool DisplayPages::appendUnit(char* output, size_t outputSize, size_t& used, const Channel& channel) {
     if (channel.getStatus() != MeasurementStatus::VALID) return true;
-    if (isPressureChannel(channel)) return appendText(output, outputSize, used, pressureUnitName());
-    if (channel.getUnit() != nullptr && strcmp(channel.getUnit(), "C") == 0) return appendText(output, outputSize, used, "\xDF" "C");
-    return appendText(output, outputSize, used, channel.getUnit());
+    return appendText(output, outputSize, used, displayUnit(channel));
 }
 
 bool DisplayPages::renderLine(PageState& page, uint8_t lineIndex, char* output, size_t outputSize) {

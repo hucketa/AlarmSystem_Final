@@ -148,6 +148,8 @@ void AlarmDisplay::buildAlarmPage(const AlarmInfo& alarm, ScreenPage& page) cons
     char line[Config::MAX_LCD_COLS + 1];
     snprintf(line, sizeof(line), "%s: %s", channel.getName(), level);
     page.setLine(0, line);
-    snprintf(line, sizeof(line), "%s %.1f %s", direction, alarm.value, channel.getUnit() != nullptr ? channel.getUnit() : "");
+    char valueText[Config::MAX_LCD_COLS + 1];
+    pages.formatValueWithUnit(channel, alarm.value, valueText, sizeof(valueText));
+    snprintf(line, sizeof(line), "%s %s", direction, valueText);
     page.setLine(1, line);
 }
